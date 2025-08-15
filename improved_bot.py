@@ -12,7 +12,7 @@ import logging
 import signal
 import sys
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 
 import aiohttp
 import pandas as pd
@@ -23,6 +23,7 @@ import websockets
 from config import Config
 from database import DatabaseManager
 from risk_manager import RiskManager
+from enhanced_strategy import EnhancedStrategy
 
 # Configure logging
 logging.basicConfig(
@@ -42,6 +43,7 @@ class BinanceFuturesBot:
         
         self.db = DatabaseManager(self.config.DB_FILE)
         self.risk_manager = RiskManager(self.config.__dict__, self.db)
+        self.strategy = EnhancedStrategy(self.config.__dict__)
         
         self.client: Optional[AsyncClient] = None
         self.bsm: Optional[BinanceSocketManager] = None
@@ -203,8 +205,41 @@ class BinanceFuturesBot:
         q = 10 ** precision
         return math.floor(x * q) / q
     
-    def _ema_signal(self, df: pd.DataFrame) -> Optional[str]:
-        """Generate EMA crossover signal"""
+    def _generate_signal(self, df: pd.DataFrame) -> Tuple[Optional[str], float, Dict[str, Any]]:
+        """Generate enhanced trading signal with ML prediction"""
+        try:
+            # Try to load trained model if not already loaded
+            if not hasattr(self.strategy, 'predictor') or self.strategy.predictor is None:
+                # Try to load improved model first, then fallback to original
+                improved_model_path = f"models/{self.config.SYMBOL}_improved_gradient_boosting.joblib"
+                original_model_path = f"models/{self.config.SYMBOL}_predictor.joblib"
+                
+                try:
+                    self.strategy.initialize_predictor()
+                    # Try improved model first
+                    if os.path.exists(improved_model_path):
+                        self.strategy.predictor.load_model(improved_model_path)
+                        logger.info("Improved ML model loaded successfully")
+                    elif os.path.exists(original_model_path):
+                        self.strategy.predictor.load_model(original_model_path)
+                        logger.info("Original ML model loaded successfully")
+                    else:
+                        logger.warning("No trained model found. Using technical signals only.")
+                except Exception as e:
+                    logger.warning(f"Could not load ML model: {e}. Using technical signals only.")
+            
+            # Generate enhanced signal
+            signal, strength, signal_info = self.strategy.generate_signal(df)
+            
+            return signal, strength, signal_info
+            
+        except Exception as e:
+            logger.error(f"Error generating signal: {e}")
+            # Fallback to simple EMA signal
+            return self._ema_signal_fallback(df), 0.5, {}
+    
+    def _ema_signal_fallback(self, df: pd.DataFrame) -> Optional[str]:
+        """Fallback EMA crossover signal"""
         if len(df) < 22:
             return None
         
@@ -292,13 +327,14 @@ class BinanceFuturesBot:
                 return False
             
             # Place market order
-            logger.info(f"Placing {signal} order: qty={qty:.6f}, price={price:.2f}")
+            qty_str = format(qty, f".{self.qty_precision}f")
+            logger.info(f"Placing {signal} order: qty={qty_str}, price={price:.2f}")
             order_result = await self._with_backoff(
                 self.client.futures_create_order,
                 symbol=self.config.SYMBOL,
                 side=signal,
                 type="MARKET",
-                quantity=qty
+                quantity=qty_str
             )
             
             self.db.store_order(self.config.SYMBOL, order_result)
@@ -419,11 +455,22 @@ class BinanceFuturesBot:
                     ])
                     df["close"] = df["close"].astype(float)
                     
-                    # Generate signal
-                    signal = self._ema_signal(df)
+                    # Generate enhanced signal
+                    signal, strength, signal_info = self._generate_signal(df)
                     current_price = float(df["close"].iloc[-1])
                     
-                    logger.info(f"Current price: {current_price:.2f}, Signal: {signal}")
+                    logger.info(f"Current price: {current_price:.2f}, Signal: {signal}, Strength: {strength:.2f}")
+                    
+                    # Log detailed signal info if available
+                    if signal_info.get('ml_prediction') is not None:
+                        logger.info(f"ML Prediction: {signal_info['ml_prediction']:.4f}, "
+                                  f"Confidence: {signal_info['ml_confidence']:.2%}")
+                    
+                    if signal_info.get('technical_signals'):
+                        tech_signals = signal_info['technical_signals']
+                        logger.info(f"Technical signals - EMA: {tech_signals.get('ema_signal', 0):.2f}, "
+                                  f"RSI: {tech_signals.get('rsi_signal', 0):.2f}, "
+                                  f"BB: {tech_signals.get('bb_signal', 0):.2f}")
                     
                     # Check market conditions
                     recent_prices = df["close"].tail(20).tolist()

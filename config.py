@@ -20,9 +20,9 @@ class Config:
     SYMBOL = "BTCUSDT"
     KLINE_INTERVAL = "1m"
     LEVERAGE = 5
-    RISK_PER_TRADE = 0.01  # 1% risk per trade
-    STOPLOSS_PCT = 0.005   # 0.5% stop loss
-    TAKE_PROFIT_PCT = 0.01 # 1% take profit
+    RISK_PER_TRADE = 0.10  # 10% risk per trade (increased for small balance)
+    STOPLOSS_PCT = 0.02    # 2% stop loss (increased for better position sizing)
+    TAKE_PROFIT_PCT = 0.04 # 4% take profit
     DAILY_MAX_LOSS_PCT = 0.03  # 3% daily max loss
     
     # Database Configuration

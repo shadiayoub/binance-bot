@@ -73,6 +73,10 @@ class RiskManager:
         raw_qty = risk_amount / per_unit_risk
         notional = raw_qty * price
         
+        logger.info(f"Position sizing - Balance: {balance:.2f}, Risk: {risk_amount:.2f}, "
+                   f"Per unit risk: {per_unit_risk:.2f}, Raw qty: {raw_qty:.6f}, "
+                   f"Notional: {notional:.2f}")
+        
         # Check minimum notional
         if notional < min_notional:
             logger.info(f"Notional {notional:.2f} below minimum {min_notional:.2f}")
@@ -87,6 +91,21 @@ class RiskManager:
         
         # Round down to precision
         qty = self._round_down(raw_qty, qty_precision)
+        
+        # Additional validation for minimum quantity
+        min_qty = min_notional / price
+        if qty < min_qty:
+            logger.warning(f"Calculated quantity {qty:.6f} below minimum {min_qty:.6f} "
+                          f"(min_notional {min_notional:.2f} / price {price:.2f})")
+            return 0.0
+        
+        # Additional check for very small positions
+        min_reasonable_qty = 0.00005  # Minimum 0.00005 BTC (further reduced for small balances)
+        if qty < min_reasonable_qty:
+            logger.warning(f"Position size {qty:.6f} too small (minimum reasonable: {min_reasonable_qty})")
+            return 0.0
+        
+        logger.info(f"Final position size: {qty:.6f} (notional: {qty * price:.2f})")
         return qty
     
     def validate_trade_parameters(self, side: str, qty: float, price: float, 
