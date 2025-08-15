@@ -17,13 +17,53 @@ class Config:
     API_SECRET = os.environ.get("API_SECRET", "")
     
     # Trading Configuration
-    SYMBOL = "BTCUSDT"
+    SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT", "SOLUSDT"]  # Multiple symbols
+    DEFAULT_SYMBOL = "BTCUSDT"  # Fallback symbol
     KLINE_INTERVAL = "1m"
     LEVERAGE = 5
     RISK_PER_TRADE = 0.10  # 10% risk per trade (increased for small balance)
     STOPLOSS_PCT = 0.02    # 2% stop loss (increased for better position sizing)
     TAKE_PROFIT_PCT = 0.04 # 4% take profit
     DAILY_MAX_LOSS_PCT = 0.03  # 3% daily max loss
+    
+    # Symbol-specific configurations
+    SYMBOL_CONFIGS = {
+        "BTCUSDT": {
+            "leverage": 5,
+            "risk_per_trade": 0.10,
+            "stoploss_pct": 0.02,
+            "take_profit_pct": 0.04,
+            "min_quantity": 0.00005
+        },
+        "ETHUSDT": {
+            "leverage": 5,
+            "risk_per_trade": 0.10,
+            "stoploss_pct": 0.02,
+            "take_profit_pct": 0.04,
+            "min_quantity": 0.001
+        },
+        "BNBUSDT": {
+            "leverage": 5,
+            "risk_per_trade": 0.10,
+            "stoploss_pct": 0.02,
+            "take_profit_pct": 0.04,
+            "min_quantity": 0.01
+        },
+        "ADAUSDT": {
+            "leverage": 5,
+            "risk_per_trade": 0.10,
+            "stoploss_pct": 0.02,
+            "take_profit_pct": 0.04,
+            "min_quantity": 1.0
+        },
+        "SOLUSDT": {
+            "leverage": 5,
+            "risk_per_trade": 0.10,
+            "stoploss_pct": 0.02,
+            "take_profit_pct": 0.04,
+            "min_quantity": 0.1
+        }
+    }
     
     # Database Configuration
     DB_FILE = "async_bot_state.db"
