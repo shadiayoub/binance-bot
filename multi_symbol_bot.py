@@ -22,6 +22,21 @@ from database import DatabaseManager
 from risk_manager import RiskManager
 from enhanced_strategy import EnhancedStrategy
 
+# Configure logging with local timezone
+import pytz
+from datetime import datetime
+
+# Get local timezone (you can change this to your specific timezone)
+# Common timezones: 'US/Eastern', 'US/Pacific', 'Europe/London', 'Asia/Tokyo'
+LOCAL_TIMEZONE = 'US/Eastern'  # Change this to your timezone
+
+class LocalTimeFormatter(logging.Formatter):
+    def formatTime(self, record, datefmt=None):
+        dt = datetime.fromtimestamp(record.created)
+        local_tz = pytz.timezone(LOCAL_TIMEZONE)
+        local_dt = pytz.utc.localize(dt).astimezone(local_tz)
+        return local_dt.strftime(datefmt or '%Y-%m-%d %H:%M:%S')
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -31,6 +46,10 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
+
+# Apply local timezone formatter
+for handler in logging.getLogger().handlers:
+    handler.setFormatter(LocalTimeFormatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s'))
 logger = logging.getLogger(__name__)
 
 class MultiSymbolBot:
@@ -181,47 +200,70 @@ class MultiSymbolBot:
     
     async def _kline_listener(self, symbol: str):
         """Listen to kline data for a specific symbol"""
-        try:
-            async with self.bsm.kline_futures_socket(symbol=symbol, interval=self.config.KLINE_INTERVAL) as stream:
-                logger.info(f"Starting kline listener for {symbol}")
-                
-                while not self.shutdown_event.is_set():
-                    try:
-                        result = await stream.recv()
-                        
-                        if result['e'] == 'kline':
-                            kline = result['k']
+        logger.info(f"Starting kline listener for {symbol}")
+        
+        while not self.shutdown_event.is_set():
+            try:
+                # Use the context manager approach which should work with older versions
+                async with self.bsm.kline_futures_socket(symbol=symbol, interval=self.config.KLINE_INTERVAL) as stream:
+                    logger.info(f"Connected to kline stream for {symbol}")
+                    
+                    while not self.shutdown_event.is_set():
+                        try:
+                            # Add timeout to prevent hanging
+                            result = await asyncio.wait_for(stream.recv(), timeout=60.0)
                             
-                            # Update symbol data
-                            kline_data = {
-                                'open_time': kline['t'],
-                                'open': float(kline['o']),
-                                'high': float(kline['h']),
-                                'low': float(kline['l']),
-                                'close': float(kline['c']),
-                                'volume': float(kline['v']),
-                                'close_time': kline['T']
-                            }
+                            # Debug: Log all incoming messages for first few seconds
+                            if len(self.symbol_data[symbol]['klines']) < 3:
+                                logger.info(f"[{symbol}] Raw message: {result}")
                             
-                            self.symbol_data[symbol]['klines'].append(kline_data)
-                            self.symbol_data[symbol]['current_price'] = float(kline['c'])
-                            
-                            # Keep only recent klines
-                            if len(self.symbol_data[symbol]['klines']) > self.config.KLINE_HISTORY:
-                                self.symbol_data[symbol]['klines'] = self.symbol_data[symbol]['klines'][-self.config.KLINE_HISTORY:]
-                            
-                            # Generate signal if we have enough data
+                            if result and 'e' in result and (result['e'] == 'kline' or result['e'] == 'continuous_kline'):
+                                kline = result['k']
+                                
+                                # Debug: Log first few klines to confirm data is flowing
+                                if len(self.symbol_data[symbol]['klines']) < 5:
+                                    logger.info(f"[{symbol}] Received kline: {kline['c']} at {kline['t']}")
+                                
+                                # Update symbol data
+                                kline_data = {
+                                    'open_time': kline['t'],
+                                    'open': float(kline['o']),
+                                    'high': float(kline['h']),
+                                    'low': float(kline['l']),
+                                    'close': float(kline['c']),
+                                    'volume': float(kline['v']),
+                                    'close_time': kline['T']
+                                }
+                                
+                                self.symbol_data[symbol]['klines'].append(kline_data)
+                                self.symbol_data[symbol]['current_price'] = float(kline['c'])
+                                
+                                # Keep only recent klines
+                                if len(self.symbol_data[symbol]['klines']) > self.config.KLINE_HISTORY:
+                                    self.symbol_data[symbol]['klines'] = self.symbol_data[symbol]['klines'][-self.config.KLINE_HISTORY:]
+                                
+                                                            # Generate signal if we have enough data
                             if len(self.symbol_data[symbol]['klines']) >= 50:
                                 await self._process_symbol_signal(symbol)
+                            else:
+                                # Debug logging to show data collection progress
+                                if len(self.symbol_data[symbol]['klines']) % 10 == 0:  # Log every 10 klines
+                                    logger.info(f"[{symbol}] Collected {len(self.symbol_data[symbol]['klines'])} klines, need 50")
                                 
-                    except asyncio.CancelledError:
-                        break
-                    except Exception as e:
-                        logger.error(f"Error in kline listener for {symbol}: {e}")
-                        await asyncio.sleep(1)
-                        
-        except Exception as e:
-            logger.error(f"Failed to start kline listener for {symbol}: {e}")
+                                # Heartbeat every 5 minutes to show bot is alive
+                                if len(self.symbol_data[symbol]['klines']) % 5 == 0 and len(self.symbol_data[symbol]['klines']) > 0:
+                                    logger.info(f"[{symbol}] Heartbeat: {len(self.symbol_data[symbol]['klines'])} klines collected, latest price: {self.symbol_data[symbol]['current_price']}")
+                                
+                        except asyncio.CancelledError:
+                            logger.info(f"Kline listener cancelled for {symbol}")
+                            break
+                        except Exception as e:
+                            logger.error(f"Error receiving kline data for {symbol}: {e}")
+                            break  # Break inner loop to reconnect
+                            
+            except Exception as e:
+                logger.error(f"Failed to connect to kline stream for {symbol}: {e}")
+                await asyncio.sleep(5)  # Wait before retrying
     
     async def _process_symbol_signal(self, symbol: str):
         """Process trading signal for a specific symbol"""

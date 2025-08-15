@@ -12,7 +12,7 @@ load_dotenv()
 
 class Config:
     # API Configuration
-    TESTNET = False  # Set to False ONLY after extensive testing
+    TESTNET = False  # Set to True for testing, False for production
     API_KEY = os.environ.get("API_KEY", "")
     API_SECRET = os.environ.get("API_SECRET", "")
     
