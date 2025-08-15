@@ -21,44 +21,49 @@ class Config:
     DEFAULT_SYMBOL = "BTCUSDT"  # Fallback symbol
     KLINE_INTERVAL = "1m"
     LEVERAGE = 5
-    RISK_PER_TRADE = 0.10  # 10% risk per trade (increased for small balance)
+    RISK_PER_TRADE = 0.05  # 5% risk per trade (reduced for larger minimum notional)
     STOPLOSS_PCT = 0.02    # 2% stop loss (increased for better position sizing)
     TAKE_PROFIT_PCT = 0.04 # 4% take profit
     DAILY_MAX_LOSS_PCT = 0.03  # 3% daily max loss
+    
+    # Trading Mode
+    ENABLE_LIVE_TRADING = True  # Set to False for paper trading only
+    MIN_SIGNAL_STRENGTH = 0.3   # Minimum signal strength to execute trades
+    MAX_DAILY_TRADES = 10       # Maximum trades per day per symbol
     
     # Symbol-specific configurations
     SYMBOL_CONFIGS = {
         "BTCUSDT": {
             "leverage": 5,
-            "risk_per_trade": 0.10,
+            "risk_per_trade": 0.05,
             "stoploss_pct": 0.02,
             "take_profit_pct": 0.04,
             "min_quantity": 0.00005
         },
         "ETHUSDT": {
             "leverage": 5,
-            "risk_per_trade": 0.10,
+            "risk_per_trade": 0.05,
             "stoploss_pct": 0.02,
             "take_profit_pct": 0.04,
             "min_quantity": 0.001
         },
         "BNBUSDT": {
             "leverage": 5,
-            "risk_per_trade": 0.10,
+            "risk_per_trade": 0.05,
             "stoploss_pct": 0.02,
             "take_profit_pct": 0.04,
             "min_quantity": 0.01
         },
         "ADAUSDT": {
             "leverage": 5,
-            "risk_per_trade": 0.10,
+            "risk_per_trade": 0.05,
             "stoploss_pct": 0.02,
             "take_profit_pct": 0.04,
             "min_quantity": 1.0
         },
         "SOLUSDT": {
             "leverage": 5,
-            "risk_per_trade": 0.10,
+            "risk_per_trade": 0.05,
             "stoploss_pct": 0.02,
             "take_profit_pct": 0.04,
             "min_quantity": 0.1
@@ -67,6 +72,15 @@ class Config:
     
     # Database Configuration
     DB_FILE = "async_bot_state.db"
+    DEMO_DB_FILE = "demo_bot_state.db"
+    LIVE_DB_FILE = "live_bot_state.db"
+
+    # Get appropriate database file based on mode
+    @staticmethod
+    def get_db_file():
+        if not Config.ENABLE_LIVE_TRADING:
+            return Config.DEMO_DB_FILE
+        return Config.LIVE_DB_FILE
     
     # Technical Analysis
     KLINE_HISTORY = 200
@@ -74,7 +88,7 @@ class Config:
     
     # Risk Management
     MAX_OPEN_POSITIONS = 3
-    MIN_BALANCE_THRESHOLD = 10.0  # Minimum balance to continue trading
+    MIN_BALANCE_THRESHOLD = 50.0  # Minimum balance to continue trading (increased for 20 USDT min notional)
     
     # Connection Settings
     WEBSOCKET_TIMEOUT = 30

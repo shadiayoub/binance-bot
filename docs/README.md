@@ -106,6 +106,55 @@ WebSocket    Technical Indicators   Model Output   Combined Signal   Position Si
    python train_multi_symbol_models.py
    ```
 
+4. **Start with Docker**
+   ```bash
+   docker-compose up -d
+   docker-compose logs -f binance-bot
+   ```
+
+## ⚠️ Important: Code Changes Require Docker Rebuild
+
+After making any changes to Python code files, you MUST rebuild the Docker image:
+
+```bash
+docker-compose build binance-bot
+docker-compose up -d binance-bot
+```
+
+**Why**: Docker containers run from pre-built images. Code changes require rebuilding to take effect.
+
+## ✅ Current Operational Status
+
+### Live Performance (v2.0.0)
+- **Status**: ✅ **FULLY OPERATIONAL**
+- **WebSocket Connections**: All 5 symbols connected and stable
+- **Real-time Data Processing**: Live kline data processing active
+- **ML Predictions**: Real-time predictions with confidence levels (10-60%)
+- **Technical Analysis**: EMA, RSI, Bollinger Bands calculations active
+- **Signal Generation**: Conservative signal generation (currently "None" - normal behavior)
+
+### Current Live Data (as of 2025-08-15)
+| Symbol | Current Price | ML Prediction | Confidence | Status |
+|--------|---------------|---------------|------------|--------|
+| **BTCUSDT** | $117,829.20 | +0.0006 | 10.00% | ✅ Active |
+| **ETHUSDT** | $4,553.50 | -0.0002 | 10.00% | ✅ Active |
+| **BNBUSDT** | $835.42 | -0.0000 | 10.00% | ✅ Active |
+| **ADAUSDT** | $0.95 | -0.0001 | 59.81% | ✅ Active |
+| **SOLUSDT** | $191.52 | -0.0000 | 10.00% | ✅ Active |
+
+### Recent Fixes
+- ✅ **WebSocket Data Processing**: Fixed continuous kline event handling
+- ✅ **Docker Deployment**: Resolved code change deployment issues
+- ✅ **Real-time Signals**: Bot now generates live ML predictions and technical signals
+- ✅ **Multi-Symbol Activity**: All 5 symbols showing real-time activity
+   # Edit .env with your API keys
+   ```
+
+3. **Train ML Models**
+   ```bash
+   python train_multi_symbol_models.py
+   ```
+
 4. **Run with Docker**
    ```bash
    docker-compose up -d

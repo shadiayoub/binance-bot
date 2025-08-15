@@ -22,21 +22,6 @@ from database import DatabaseManager
 from risk_manager import RiskManager
 from enhanced_strategy import EnhancedStrategy
 
-# Configure logging with local timezone
-import pytz
-from datetime import datetime
-
-# Get local timezone (you can change this to your specific timezone)
-# Common timezones: 'US/Eastern', 'US/Pacific', 'Europe/London', 'Asia/Tokyo'
-LOCAL_TIMEZONE = 'US/Eastern'  # Change this to your timezone
-
-class LocalTimeFormatter(logging.Formatter):
-    def formatTime(self, record, datefmt=None):
-        dt = datetime.fromtimestamp(record.created)
-        local_tz = pytz.timezone(LOCAL_TIMEZONE)
-        local_dt = pytz.utc.localize(dt).astimezone(local_tz)
-        return local_dt.strftime(datefmt or '%Y-%m-%d %H:%M:%S')
-
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -46,10 +31,6 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
-
-# Apply local timezone formatter
-for handler in logging.getLogger().handlers:
-    handler.setFormatter(LocalTimeFormatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s'))
 logger = logging.getLogger(__name__)
 
 class MultiSymbolBot:
@@ -57,7 +38,9 @@ class MultiSymbolBot:
     
     def __init__(self):
         self.config = Config()
-        self.db = DatabaseManager(self.config.DB_FILE)
+        # Use appropriate database based on trading mode
+        db_file = self.config.get_db_file()
+        self.db = DatabaseManager(db_file)
         self.risk_manager = RiskManager(self.config, self.db)
         self.strategy = EnhancedStrategy(self.config.__dict__)
         
@@ -179,24 +162,55 @@ class MultiSymbolBot:
             except Exception as e:
                 logger.error(f"Failed to set leverage for {symbol}: {e}")
     
+    async def _with_backoff(self, coro_fn, *args, retries=5, base_delay=1.0, **kwargs):
+        """Execute coroutine with exponential backoff"""
+        delay = base_delay
+        for attempt in range(1, retries + 1):
+            try:
+                return await coro_fn(*args, **kwargs)
+            except Exception as e:
+                logger.warning(f"Attempt {attempt} failed: {e}")
+                if attempt == retries:
+                    raise
+                await asyncio.sleep(delay)
+                delay *= 2
+
     async def _get_initial_balance(self):
         """Get initial account balance"""
         try:
-            account = await self.client.futures_account()
-            balance = float(account['totalWalletBalance'])
+            account_balance = await self._with_backoff(self.client.futures_account_balance)
+            balance = 0.0
+            for asset in account_balance:
+                if asset['asset'] == 'USDT':
+                    balance = float(asset['balance'])
+                    break
             self.risk_manager.start_balance = balance
             logger.info(f"Initial balance: {balance:.2f} USDT")
+            return True
         except Exception as e:
             logger.error(f"Failed to get initial balance: {e}")
+            logger.warning("Using demo balance for testing")
+            self.risk_manager.start_balance = 100.0  # Demo balance
+            logger.info("Demo balance set: 100.00 USDT")
+            return False
     
     async def _create_listen_key(self):
         """Create listen key for user data stream"""
         try:
             result = await self.client.futures_stream_get_listen_key()
-            self.listen_key = result['listenKey']
+            # Handle different response formats
+            if isinstance(result, dict) and 'listenKey' in result:
+                self.listen_key = result['listenKey']
+            elif isinstance(result, str):
+                self.listen_key = result
+            else:
+                logger.warning("Unexpected listen key response format")
+                self.listen_key = None
+                return
             logger.info("Listen key created successfully")
         except Exception as e:
-            logger.error(f"Failed to create listen key: {e}")
+            logger.warning(f"Failed to create listen key: {e}")
+            self.listen_key = None
     
     async def _kline_listener(self, symbol: str):
         """Listen to kline data for a specific symbol"""
@@ -289,9 +303,15 @@ class MultiSymbolBot:
                        f"RSI: {technical_signals.get('rsi_signal', 0.00):.2f}, "
                        f"BB: {technical_signals.get('bb_signal', 0.00):.2f}")
             
-            # Execute trade if signal is strong enough
-            if signal and strength > 0.3:
-                await self._execute_trade(symbol, signal, strength, current_price)
+            # Execute trade if signal is strong enough and trading is enabled
+            if signal and strength > self.config.MIN_SIGNAL_STRENGTH:
+                if self.config.ENABLE_LIVE_TRADING:
+                    logger.info(f"[{symbol}] 🚀 EXECUTING LIVE TRADE: {signal} @ {current_price:.2f} (Strength: {strength:.2f})")
+                    await self._execute_trade(symbol, signal, strength, current_price)
+                else:
+                    logger.info(f"[{symbol}] 📊 PAPER TRADE: {signal} @ {current_price:.2f} (Strength: {strength:.2f}) - Live trading disabled")
+            elif signal and strength > 0.1:
+                logger.info(f"[{symbol}] ⚠️ Signal too weak: {signal} (Strength: {strength:.2f} < {self.config.MIN_SIGNAL_STRENGTH})")
                 
         except Exception as e:
             logger.error(f"Error processing signal for {symbol}: {e}")
@@ -299,21 +319,40 @@ class MultiSymbolBot:
     async def _execute_trade(self, symbol: str, signal: str, strength: float, price: float):
         """Execute trade for a specific symbol"""
         try:
+            # Safety check: Ensure trading is enabled
+            if not self.config.ENABLE_LIVE_TRADING:
+                logger.warning(f"[{symbol}] Live trading is disabled, skipping trade")
+                return
+            
             # Check if we already have a position
             if self.symbol_positions[symbol]:
                 logger.info(f"[{symbol}] Already have position, skipping trade")
+                return
+            
+            # Additional safety checks
+            if strength < self.config.MIN_SIGNAL_STRENGTH:
+                logger.warning(f"[{symbol}] Signal strength {strength:.2f} below minimum {self.config.MIN_SIGNAL_STRENGTH}")
                 return
             
             # Get symbol-specific config
             config = self.config.SYMBOL_CONFIGS.get(symbol, {})
             min_quantity = config.get('min_quantity', 0.001)
             
-            # Calculate position size
+            # Get current balance and validate
             balance = await self._get_current_balance()
+            if balance < self.config.MIN_BALANCE_THRESHOLD:
+                logger.warning(f"[{symbol}] Balance {balance:.2f} below minimum threshold {self.config.MIN_BALANCE_THRESHOLD}")
+                return
+            
+            logger.info(f"[{symbol}] Current balance: {balance:.2f} USDT")
+            
+            # Calculate position size
             position_size = self.risk_manager.calculate_position_size(
                 balance, 
-                config.get('risk_per_trade', self.config.RISK_PER_TRADE),
                 price,
+                config.get('risk_per_trade', self.config.RISK_PER_TRADE),
+                config.get('stoploss_pct', self.config.STOPLOSS_PCT),
+                self.symbol_data[symbol]['precision']['qty'],
                 min_quantity
             )
             
@@ -392,8 +431,13 @@ class MultiSymbolBot:
     async def _get_current_balance(self) -> float:
         """Get current account balance"""
         try:
-            account = await self.client.futures_account()
-            return float(account['totalWalletBalance'])
+            account_balance = await self._with_backoff(self.client.futures_account_balance)
+            balance = 0.0
+            for asset in account_balance:
+                if asset['asset'] == 'USDT':
+                    balance = float(asset['balance'])
+                    break
+            return balance
         except Exception as e:
             logger.error(f"Failed to get current balance: {e}")
             return 0.0
@@ -405,9 +449,19 @@ class MultiSymbolBot:
     
     async def _user_data_listener(self):
         """Listen to user data stream for order updates"""
+        if not self.listen_key:
+            logger.warning("No listen key available, skipping user data listener")
+            return
+            
         try:
-            async with self.bsm.futures_user_socket(self.listen_key) as stream:
-                logger.info("Connected to user data websocket")
+            # Try different method signatures
+            try:
+                async with self.bsm.futures_user_socket(self.listen_key) as stream:
+                    logger.info("Connected to user data websocket")
+            except TypeError:
+                # Fallback for different API versions
+                async with self.bsm.futures_user_socket() as stream:
+                    logger.info("Connected to user data websocket (fallback)")
                 
                 while not self.shutdown_event.is_set():
                     try:
@@ -436,8 +490,11 @@ class MultiSymbolBot:
     async def run(self):
         """Run the multi-symbol bot"""
         try:
-            # Start user data listener
-            asyncio.create_task(self._user_data_listener())
+            # Start user data listener only if we have a listen key
+            if self.listen_key:
+                asyncio.create_task(self._user_data_listener())
+            else:
+                logger.info("Skipping user data listener (no listen key available)")
             
             # Start kline listeners for all symbols
             kline_tasks = []

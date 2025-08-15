@@ -77,9 +77,15 @@ class RiskManager:
                    f"Per unit risk: {per_unit_risk:.2f}, Raw qty: {raw_qty:.6f}, "
                    f"Notional: {notional:.2f}")
         
-        # Check minimum notional
+        # Check minimum notional (Binance requires at least 20 USDT)
+        min_binance_notional = 20.0  # Binance minimum notional requirement
+        if notional < min_binance_notional:
+            logger.warning(f"Notional {notional:.2f} below Binance minimum {min_binance_notional:.2f}")
+            return 0.0
+        
+        # Check symbol-specific minimum notional
         if notional < min_notional:
-            logger.info(f"Notional {notional:.2f} below minimum {min_notional:.2f}")
+            logger.info(f"Notional {notional:.2f} below symbol minimum {min_notional:.2f}")
             return 0.0
         
         # Check maximum position size

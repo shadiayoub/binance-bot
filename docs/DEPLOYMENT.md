@@ -77,6 +77,21 @@ docker-compose logs -f binance-bot
 
 ## 🐳 Docker Deployment
 
+### ⚠️ Critical: Code Changes Require Docker Rebuild
+
+**IMPORTANT**: After making any changes to Python code files, you MUST rebuild the Docker image:
+
+```bash
+# After code changes:
+docker-compose build binance-bot
+docker-compose up -d binance-bot
+
+# Verify the changes are active:
+docker-compose logs -f binance-bot
+```
+
+**Why this is necessary**: Docker containers run from pre-built images. Code changes are not automatically reflected without rebuilding the image.
+
 ### Production Deployment
 
 ```bash
