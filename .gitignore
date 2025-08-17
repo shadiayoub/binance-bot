@@ -151,7 +151,7 @@ desktop.ini
 # Docker
 .dockerignore
 Dockerfile
-docker-compose.yml
+#docker-compose.yml
 docker-compose.yaml
 
 # Backup files
