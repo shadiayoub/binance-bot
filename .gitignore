@@ -150,7 +150,7 @@ desktop.ini
 
 # Docker
 .dockerignore
-Dockerfile
+#Dockerfile
 #docker-compose.yml
 docker-compose.yaml
 
